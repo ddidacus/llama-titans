@@ -1,8 +1,8 @@
-from titans_pytorch.neural_memory import (
+from .neural_memory import (
     NeuralMemory,
 )
 
-from titans_pytorch.memory_models import (
+from .memory_models import (
     MemoryMLP,
     MemoryAttention,
     FactorizedMemoryMLP,
@@ -10,6 +10,10 @@ from titans_pytorch.memory_models import (
     GatedResidualMemoryMLP
 )
 
-from titans_pytorch.mac_transformer import (
+from .mac_transformer import (
     MemoryAsContextTransformer
+)
+
+from .llama import (
+    TitanLlamaModel
 )

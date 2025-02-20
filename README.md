@@ -19,17 +19,8 @@ $ pip install -e .
 ## Usage
 
 ```python
-import torch
-import transformers
 from llama_titans import TitanLlamaModel
-from transformers.configuration_utils import PretrainedConfig
-
-base_model = transformers.AutoModelForCausalLM.from_pretrained(model_path).cuda()
-tokenizer = transformers.AutoTokenizer.from_pretrained(model_path)
-config = PretrainedConfig.from_pretrained(model_path)
-
-model = TitanLlamaModel(config=config).cuda()
-model.load_state_dict(base_model.state_dict(), strict=False) # use pre-trained llama weights
+model = TitanLlamaModel.from_pretrained("meta-llama/Meta-Llama-3-8B")
 ```
 
 ## Citations

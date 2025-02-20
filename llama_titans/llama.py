@@ -9,6 +9,7 @@ from transformers.processing_utils import Unpack
 from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
 from transformers.models.llama.modeling_llama import LlamaForCausalLM
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer
+from transformers.models.llama.configuration_llama import LlamaConfig
 
 class TitanLlamaModel(LlamaForCausalLM):
     def __init__(self, *args, **kwargs):
@@ -19,6 +20,15 @@ class TitanLlamaModel(LlamaForCausalLM):
                 new_layer.load_state_dict(layer.state_dict(), strict=False)
                 self.model.layers[idx] = new_layer
                 del layer
+    
+    @staticmethod
+    def from_pretrained(path: str):
+        config = LlamaConfig.from_pretrained(path)
+        state_dict = LlamaForCausalLM.from_pretrained(path).state_dict()
+        model = TitanLlamaModel(config=config)
+        model.load_state_dict(state_dict, strict=False)
+        del state_dict
+        return model
 
 class TitanLlamaDecoderLayer(nn.Module):
     def __init__(self, config: LlamaConfig, layer_idx: int):
