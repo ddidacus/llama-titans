@@ -13,61 +13,23 @@ Unofficial implementation of [Titans](https://arxiv.org/abs/2501.00663) in Pytor
 ## Install
 
 ```bash
-$ pip install titans-pytorch
+$ pip install -e .
 ```
 
 ## Usage
 
 ```python
 import torch
-from titans_pytorch import NeuralMemory
+import transformers
+from llama_titans import TitanLlamaModel
+from transformers.configuration_utils import PretrainedConfig
 
-mem = NeuralMemory(
-    dim = 384,
-    chunk_size = 64 # set to smaller chunk size for better perf on smaller sequence lengths (but more memory usage)
-).cuda()
+base_model = transformers.AutoModelForCausalLM.from_pretrained(model_path).cuda()
+tokenizer = transformers.AutoTokenizer.from_pretrained(model_path)
+config = PretrainedConfig.from_pretrained(model_path)
 
-seq = torch.randn(2, 1024, 384).cuda()
-retrieved, mem_state = mem(seq)
-
-assert seq.shape == retrieved.shape
-```
-
-A transformer with the `MAC` configuration can be used as
-
-```python
-import torch
-from titans_pytorch import MemoryAsContextTransformer
-
-transformer = MemoryAsContextTransformer(
-    num_tokens = 256,
-    dim = 256,
-    depth = 2,
-    segment_len = 128,              # local attention window size
-    num_persist_mem_tokens = 4,
-    num_longterm_mem_tokens = 16,
-)
-
-token_ids = torch.randint(0, 256, (1, 1023))
-
-loss = transformer(token_ids, return_loss = True) # (1, 1023, 256)
-loss.backward()
-
-# after much training
-
-sampled = transformer.sample(token_ids[:, :4], 512)
-```
-
-## Experiments
-
-```bash
-$ pip install .[examples]
-```
-
-Then modify `train_mac.py` and run it to query nature
-
-```bash
-$ python train_mac.py
+model = TitanLlamaModel(config=config).cuda()
+model.load_state_dict(base_model.state_dict(), strict=False) # use pre-trained llama weights
 ```
 
 ## Citations
