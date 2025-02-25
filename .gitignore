@@ -1,6 +1,10 @@
+datasets
 train_local.py
-test_local.py
+test_local*
 .DS_Store
+
+*.slurm
+*.out
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

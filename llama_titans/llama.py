@@ -1,9 +1,12 @@
 import torch
+import math
 import torch.nn as nn
+from copy import deepcopy
 from typing import Optional, Tuple
 from .neural_memory import NeuralMemory
 from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.models.llama.modeling_llama import LlamaAttention, LlamaMLP, LlamaRMSNorm
+from transformers.models.mistral.modeling_mistral import MistralAttention
 from transformers.cache_utils import Cache
 from transformers.processing_utils import Unpack
 from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
@@ -11,17 +14,10 @@ from transformers.models.llama.modeling_llama import LlamaForCausalLM
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 from transformers.models.llama.configuration_llama import LlamaConfig
 
-# https://github.com/lucidrains/titans-pytorch/blob/55b4d712eae34ad7c593da0beb7e33a7f9c2e43a/titans_pytorch/mac_transformer.py#L776
-# TODO/Questions:
-#   - should the memory state be passed across layers as in the original implementations?
-#   - or does it work also the way it's implemented here: independent memories by layer (abstraction), passing state over time
-
 class TitanLlamaModel(LlamaForCausalLM):
     def __init__(self, gated:bool=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
-
-        if hasattr(args, 'gated'): self.gated = gated
-        else: self.gated = False
+        self.gated = gated
 
         # Applying titan layer to llama
         for idx, layer in enumerate(self.model.layers):
@@ -51,9 +47,10 @@ class TitanLlamaDecoderLayer(nn.Module):
         self.gated = gated
         self.hidden_size = config.hidden_size
         if hasattr(config, "chunk_size"): self.chunk_size = config.chunk_size
-        else: self.chunk_size = 64
+        else: self.chunk_size = 128
 
-        self.self_attn = LlamaAttention(config=config, layer_idx=layer_idx)
+        config.sliding_window = True # main difference wrt. llama
+        self.self_attn = MistralAttention(config=config, layer_idx=layer_idx)
 
         self.memory = NeuralMemory(
             dim = config.hidden_size,
@@ -76,11 +73,15 @@ class TitanLlamaDecoderLayer(nn.Module):
         position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # necessary, but kept here for BC
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
-        residual = hidden_states
+      
+        # Memory As Layer (MAL)
+        if not self.gated:
+            residual = hidden_states
+            hidden_states, self.memory_state = self.memory(seq=hidden_states, state=self.memory_state)
+            hidden_states = residual + hidden_states
 
-        hidden_states, new_state = self.memory(seq=hidden_states, state=self.memory_state)
-        self.memory_state = new_state
-        
+        # Layer norm
+        residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
 
         # Self Attention
@@ -95,8 +96,10 @@ class TitanLlamaDecoderLayer(nn.Module):
             position_embeddings=position_embeddings,
             **kwargs,
         )
-        # Memory As Gate (MAG), otherwise Memory As Layer (MAL)
+        
+        # Memory As Gate (MAG)
         if self.gated: 
+            hidden_states, self.memory_state = self.memory(seq=hidden_states, state=self.memory_state)
             attn_out_gates = hidden_states.sigmoid()
             hidden_states *= attn_out_gates
 
