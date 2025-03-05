@@ -20,8 +20,8 @@ $ pip install -e .
 
 ```python
 from llama_titans import TitanLlamaModel
-model = TitanLlamaModel.from_pretrained("meta-llama/Meta-Llama-3-8B", gated=True) # Memory as Gate (MAG)
-model = TitanLlamaModel.from_pretrained("meta-llama/Meta-Llama-3-8B", gated=False) # Memory as Layer (MAL)
+model = TitanLlamaModel.from_pretrained("meta-llama/Llama-3.2-1B", gated=True) # Memory as Gate (MAG)
+model = TitanLlamaModel.from_pretrained("meta-llama/Llama-3.2-1B", gated=False) # Memory as Layer (MAL)
 ```
 
 ## Citations

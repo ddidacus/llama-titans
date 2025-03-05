@@ -2,7 +2,7 @@ import torch
 import math
 import torch.nn as nn
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 from .neural_memory import NeuralMemory
 from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.models.llama.modeling_llama import LlamaAttention, LlamaMLP, LlamaRMSNorm
@@ -14,15 +14,20 @@ from transformers.models.llama.modeling_llama import LlamaForCausalLM
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 from transformers.models.llama.configuration_llama import LlamaConfig
 
-class TitanLlamaModel(LlamaForCausalLM):
-    def __init__(self, gated:bool=False, *args, **kwargs):
+from transformers.models.mistral.modeling_mistral import MistralForCausalLM, MistralMLP, MistralRMSNorm
+from transformers.models.mistral.configuration_mistral import MistralConfig
+
+
+class TitanLlamaModel(MistralForCausalLM):
+    def __init__(self, gated:bool=False, segment_size:int=4096, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.gated = gated
+        self.segment_size = segment_size
 
         # Applying titan layer to llama
         for idx, layer in enumerate(self.model.layers):
             if isinstance(layer, LlamaDecoderLayer):
-                new_layer = TitanLlamaDecoderLayer(config=self.config, layer_idx=idx).to(self.device)
+                new_layer = TitanLlamaDecoderLayer(config=self.config, layer_idx=idx, segment_size=segment_size).to(self.device)
                 new_layer.load_state_dict(layer.state_dict(), strict=False)
                 self.model.layers[idx] = new_layer
                 del layer
@@ -33,23 +38,24 @@ class TitanLlamaModel(LlamaForCausalLM):
                 self.model.layers[idx].memory_state = None
                 
     @staticmethod
-    def from_pretrained(path: str, gated:bool = False):
-        config = LlamaConfig.from_pretrained(path)
-        state_dict = LlamaForCausalLM.from_pretrained(path).state_dict()
-        model = TitanLlamaModel(config=config, gated=gated)
+    def from_pretrained(path: str, gated:bool = False, segment_size:int = 4096):
+        config = MistralConfig.from_pretrained(path)
+        state_dict = MistralForCausalLM.from_pretrained(path).state_dict()
+        model = TitanLlamaModel(config=config, gated=gated, segment_size=segment_size)
         model.load_state_dict(state_dict, strict=False)
+        model.to(torch.bfloat16) # necessary for flash_attn2
         del state_dict
         return model
 
 class TitanLlamaDecoderLayer(nn.Module):
-    def __init__(self, config: LlamaConfig, layer_idx: int, gated:bool = False):
+    def __init__(self, config: MistralConfig, layer_idx: int, gated:bool = False, segment_size:int=4096):
         super().__init__()
         self.gated = gated
         self.hidden_size = config.hidden_size
-        if hasattr(config, "chunk_size"): self.chunk_size = config.chunk_size
-        else: self.chunk_size = 128
+        self.chunk_size = segment_size
 
-        config.sliding_window = True # main difference wrt. llama
+        config.sliding_window = self.chunk_size # main difference wrt. llama
+        config._attn_implementation="flash_attention_2" # necessary for sliding_window
         self.self_attn = MistralAttention(config=config, layer_idx=layer_idx)
 
         self.memory = NeuralMemory(
@@ -57,9 +63,9 @@ class TitanLlamaDecoderLayer(nn.Module):
             chunk_size = self.chunk_size # set to smaller chunk size for better perf on smaller sequence lengths (but more memory usage)
         )
         self.memory_state = None
-        self.mlp = LlamaMLP(config)
-        self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.mlp = MistralMLP(config)
+        self.input_layernorm = MistralRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.post_attention_layernorm = MistralRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
         self,
@@ -75,7 +81,7 @@ class TitanLlamaDecoderLayer(nn.Module):
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
       
         # Memory As Layer (MAL)
-        if not self.gated:
+        if self.gated == False:
             residual = hidden_states
             hidden_states, self.memory_state = self.memory(seq=hidden_states, state=self.memory_state)
             hidden_states = residual + hidden_states
@@ -83,7 +89,7 @@ class TitanLlamaDecoderLayer(nn.Module):
         # Layer norm
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
-
+        
         # Self Attention
         hidden_states, self_attn_weights = self.self_attn(
             hidden_states=hidden_states,
@@ -98,7 +104,7 @@ class TitanLlamaDecoderLayer(nn.Module):
         )
         
         # Memory As Gate (MAG)
-        if self.gated: 
+        if self.gated == True: 
             hidden_states, self.memory_state = self.memory(seq=hidden_states, state=self.memory_state)
             attn_out_gates = hidden_states.sigmoid()
             hidden_states *= attn_out_gates
@@ -108,6 +114,9 @@ class TitanLlamaDecoderLayer(nn.Module):
         # Fully Connected
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
+
+        # it needs to be batched
+        # Why should it work on Mistral and not here????
         hidden_states = self.mlp(hidden_states)
         hidden_states = residual + hidden_states
 
