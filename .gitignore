@@ -1,4 +1,6 @@
 datasets
+models
+ckpt
 wandb
 train_local.py
 test_local*
@@ -6,6 +8,7 @@ test_local*
 
 *.slurm
 *.out
+*.swp
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

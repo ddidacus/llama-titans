@@ -14,6 +14,6 @@ from .mac_transformer import (
     MemoryAsContextTransformer
 )
 
-from .llama import (
-    TitanLlamaModel
+from .titan import (
+    TitanModel
 )

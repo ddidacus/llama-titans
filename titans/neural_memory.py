@@ -22,6 +22,7 @@ from titans_pytorch.memory_models import(
 )
 
 import einx
+from tensordict import TensorDict
 from einops import einsum, rearrange, repeat, reduce, pack, unpack
 from einops.layers.torch import Rearrange, Reduce
 
@@ -683,7 +684,7 @@ class NeuralMemory(Module):
 
         if num_chunks == 0:
             updates = rearrange_dict_values(weights, 'bh ... -> bh 1 ...')
-            next_store_state = NeuralMemState(next_seq_len_index, weights, remainder, past_state, updates)
+            next_store_state = NeuralMemState(next_seq_len_index, weights.detach(), remainder.detach(), tuple(x.detach() for x in past_state), updates.detach())
 
             output = (updates, next_store_state)
 
@@ -740,7 +741,7 @@ class NeuralMemory(Module):
 
         next_state = (next_last_update, next_last_momentum)
 
-        next_store_state = NeuralMemState(next_seq_len_index, weights, remainder, next_state, updates)
+        next_store_state = NeuralMemState(next_seq_len_index, weights.detach(), remainder.detach(), tuple(x.detach() for x in past_state), updates.detach())
 
         # return updates to neural memory at all chunked timesteps + neural mem cache / state to be fed back
 
